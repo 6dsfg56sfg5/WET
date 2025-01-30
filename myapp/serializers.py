@@ -2,9 +2,11 @@ from rest_framework import serializers
 from .models import Square, Triangle, Circle
 import math
 
+
 class ShapeSerializer(serializers.ModelSerializer):
     class Meta:
         fields = ['id', 'name']
+
 
 class SquareSerializer(ShapeSerializer):
     class Meta(ShapeSerializer.Meta):
@@ -20,6 +22,7 @@ class SquareSerializer(ShapeSerializer):
     def get_perimeter(self, obj):
         return obj.perimeter()
 
+
 class TriangleSerializer(ShapeSerializer):
     class Meta(ShapeSerializer.Meta):
         model = Triangle
@@ -33,6 +36,7 @@ class TriangleSerializer(ShapeSerializer):
 
     def get_perimeter(self, obj):
         return obj.perimeter()
+
 
 class CircleSerializer(ShapeSerializer):
     class Meta(ShapeSerializer.Meta):

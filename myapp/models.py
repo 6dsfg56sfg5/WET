@@ -1,12 +1,14 @@
 from django.db import models
 import math
 
+
 class Shape(models.Model):
     # Базовый класс для геометрических фигур
     name = models.CharField(max_length=100)
 
     class Meta:
         abstract = True
+
 
 class Square(Shape):
     side_length = models.FloatField()
@@ -16,6 +18,7 @@ class Square(Shape):
 
     def perimeter(self):
         return 4 * self.side_length
+
 
 class Triangle(Shape):
     side_a = models.FloatField()
@@ -29,6 +32,7 @@ class Triangle(Shape):
     def perimeter(self):
         return self.side_a + self.side_b + self.side_c
 
+
 class Circle(Shape):
     radius = models.FloatField()
 
@@ -37,7 +41,6 @@ class Circle(Shape):
 
     def perimeter(self):
         return 2 * math.pi * self.radius
-
 
 
 #
