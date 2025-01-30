@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Главная страница</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #fff;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+            border-radius: 8px;
+        }
+        h1 {
+            color: #007BFF;
+        }
+        .nav {
+            margin-bottom: 20px;
+        }
+        .nav a {
+            margin-right: 15px;
+            text-decoration: none;
+            color: #007BFF;
+        }
+        .nav a:hover {
+            text-decoration: underline;
+        }
+        .welcome-message {
+            font-size: 1.2em;
+            margin-bottom: 20px;
+        }
+        .features {
+            margin-top: 20px;
+        }
+        .features h2 {
+            color: #007BFF;
+        }
+        .features ul {
+            list-style-type: none;
+            padding: 0;
+        }
+        .features ul li {
+            background: #f9f9f9;
+            margin: 5px 0;
+            padding: 10px;
+            border-left: 4px solid #007BFF;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Навигация -->
+        <div class="nav">
+            {% if user.is_authenticated %}
+                <a href="{% url 'logout' %}">Выйти</a>
+            {% else %}
+                <a href="{% url 'login' %}">Войти</a>
+                <a href="{% url 'register' %}">Зарегистрироваться</a>
+            {% endif %}
+        </div>
+
+        <!-- Приветствие -->
+        <div class="welcome-message">
+            {% if user.is_authenticated %}
+                <h1>Добро пожаловать, {{ user.username }}!</h1>
+                <p>Спасибо, что используете наш сайт.</p>
+            {% else %}
+                <h1>Добро пожаловать!</h1>
+                <p>Пожалуйста, войдите или зарегистрируйтесь, чтобы продолжить.</p>
+            {% endif %}
+        </div>
+
+        <!-- Описание функционала -->
+        <div class="features">
+            <h2>Возможности сайта:</h2>
+            <ul>
+                <li>Регистрация и вход в систему.</li>
+                <li>Управление геометрическими фигурами (квадрат, треугольник, круг).</li>
+                <li>Вычисление площади и периметра фигур.</li>
+                <li>Логирование всех запросов.</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
