@@ -26,7 +26,16 @@ async function api(path, opts = {}) {
   let method = opts.method;
   if (!method) {
     if (hasBody) {
-      const isEdit = /^\/api\/(rooms|buildings|objects|violations|employees)\/\d+(\/|$)/.test(path);
+      // Явный реестр PATCH-эндпоинтов: редактирование существующей сущности.
+      // Всё остальное с телом — POST (создание/вложенные действия).
+      const isEdit = [
+        /^\/api\/objects\/\d+$/,
+        /^\/api\/buildings\/\d+$/,
+        /^\/api\/rooms\/\d+$/,
+        /^\/api\/violations\/\d+$/,
+        /^\/api\/violations\/\d+\/status$/,
+        /^\/api\/employees\/\d+$/,
+      ].some(re => re.test(path));
       method = isEdit ? "PATCH" : "POST";
     } else {
       method = "GET";
@@ -352,34 +361,36 @@ function buildingFormHtml(b) {
 async function buildingDialog(oid, b) {
   const r = await showModal(b ? "Редактировать корпус" : "Новый корпус", buildingFormHtml(b));
   if (!r) return;
-  // живая пересчёт общего количества квартир в форме
-  const recalc = () => {
-    const t = Number(r.querySelector("#bf-floors").value) *
-              (Number(r.querySelector("#bf-entrances").value) || 1) *
-              Number(r.querySelector("#bf-per").value);
-    r.querySelector("#bf-total").textContent = `Всего помещений: ${isFinite(t) ? t : 0}`;
-  };
-  ["#bf-floors", "#bf-entrances", "#bf-per"].forEach(sel =>
-    r.querySelector(sel).addEventListener("input", recalc));
+  // читаем значения сразу, пока форма жива (после закрытия модалки поля теряются)
   const data = {
     name: r.querySelector("#bf-name").value.trim(),
     address: r.querySelector("#bf-address").value.trim(),
     floors: Number(r.querySelector("#bf-floors").value),
     apartments_per_floor: Number(r.querySelector("#bf-per").value),
     entrances: Number(r.querySelector("#bf-entrances").value) || 1,
+    generate_rooms: !!r.querySelector("#bf-gen")?.checked,
   };
+  // живая пересчёт общего количества квартир в форме
+  const recalc = () => {
+    const t = Number(r.querySelector("#bf-floors").value) *
+              (Number(r.querySelector("#bf-entrances").value) || 1) *
+              Number(r.querySelector("#bf-per").value);
+    const el = r.querySelector("#bf-total");
+    if (el) el.textContent = `Всего помещений: ${isFinite(t) ? t : 0}`;
+  };
+  ["#bf-floors", "#bf-entrances", "#bf-per"].forEach(sel =>
+    r.querySelector(sel)?.addEventListener("input", recalc));
   if (!data.name) return toast("Укажите название корпуса");
-  const newTotal = data.floors * data.entrances * data.apartments_per_floor;
   try {
     if (b) {
       await api(`/api/buildings/${b.id}`, { json: data });
+      const newTotal = data.floors * data.entrances * data.apartments_per_floor;
       const oldTotal = b.floors * (b.entrances ?? 1) * b.apartments_per_floor;
       if (newTotal > oldTotal) {
-        await fetch(`/api/buildings/${b.id}/generate?floors=${data.floors}&per_floor=${data.apartments_per_floor}&entrances=${data.entrances}`, {
-          method: "POST", headers: { "Authorization": "Bearer " + state.token } });
+        // генерация недостающих квартир — параметры в query, тело не требуется
+        await api(`/api/buildings/${b.id}/generate?floors=${data.floors}&per_floor=${data.apartments_per_floor}&entrances=${data.entrances}`, { method: "POST" });
       }
     } else {
-      data.generate_rooms = !!r.querySelector("#bf-gen")?.checked;
       await api(`/api/objects/${oid}/buildings`, { json: data });
     }
     toast("Сохранено"); goObject(oid);
