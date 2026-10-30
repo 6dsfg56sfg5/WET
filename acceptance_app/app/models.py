@@ -103,6 +103,7 @@ class Building(Base):
     name: Mapped[str] = mapped_column(String(120))          # напр. «Корпус 1»
     floors: Mapped[int] = mapped_column(Integer, default=1)
     apartments_per_floor: Mapped[int] = mapped_column(Integer, default=1)
+    entrances: Mapped[int] = mapped_column(Integer, default=1)  # количество подъездов
 
     object: Mapped["Object"] = relationship(back_populates="buildings")
     rooms: Mapped[list["Room"]] = relationship(
@@ -132,6 +133,7 @@ class Room(Base):
     building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id", ondelete="CASCADE"))
     number: Mapped[str] = mapped_column(String(32))
     floor: Mapped[int] = mapped_column(Integer, default=1)
+    entrance: Mapped[int] = mapped_column(Integer, default=1)   # подъезд
     kind: Mapped[str] = mapped_column(String(32), default="residential")
     finish_type: Mapped[str] = mapped_column(String(32), default="rough")
     status: Mapped[str] = mapped_column(String(40), default="not_inspected")
