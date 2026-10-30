@@ -16,13 +16,21 @@ const state = {
 };
 
 async function api(path, opts = {}) {
-  const headers = opts.headers || {};
+  const headers = Object.assign({}, opts.headers || {});
   if (state.token) headers["Authorization"] = "Bearer " + state.token;
+  let method = opts.method || (opts.json !== undefined || opts.body !== undefined ? "POST" : "GET");
+  method = method.toUpperCase();
+  let body;
   if (opts.json !== undefined) {
     headers["Content-Type"] = "application/json";
-    opts.body = JSON.stringify(opts.json);
+    body = JSON.stringify(opts.json);
+  } else if (opts.body !== undefined) {
+    body = opts.body; // FormData — Content-Type ставит браузер
   }
-  const resp = await fetch(path, { ...opts, headers });
+  const init = { ...opts, method, headers };
+  if (body !== undefined && method !== "GET" && method !== "HEAD") init.body = body;
+  delete init.json;
+  const resp = await fetch(path, init);
   if (resp.status === 401 && !path.includes("/login")) { doLogout(false); throw new Error("Сессия истекла"); }
   if (!resp.ok) {
     let msg = "Ошибка " + resp.status;
