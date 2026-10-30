@@ -210,7 +210,7 @@ function renderBuildings(o) {
       <div class="building-head">
         <span class="arrow">▶</span>
         <b>${esc(b.name)}</b>
-        <span class="muted small">${esc(b.address)} · этажей: ${b.floors} · подъездов: ${b.entrances ?? 1} · квартир на этаж: ${b.apartments_per_floor}</span>
+        <span class="muted small">${esc(b.address)} · этажей: ${b.floors} · подъездов: ${b.entrances ?? 1} · квартир на этаж (в подъезде): ${b.apartments_per_floor} · всего помещений: ${b.total_rooms ?? ((b.entrances ?? 1) * b.apartments_per_floor * b.floors)}</span>
         <span class="total-tag">помещений: ${b.stats.total}</span>
         <span class="stat-line">${chipsHtml(b.stats)}</span>
         <span class="bld-actions lvl3">
@@ -256,62 +256,98 @@ async function renderChess(body, bid) {
     `<span class="muted">— пунктирная рамка: нежилое помещение</span></div><div class="chess">Загрузка…</div>`;
   const res = await api(`/api/buildings/${bid}/rooms`);
   const rooms = Array.isArray(res) ? res : res.rooms;
-  const entrancesCount = (!Array.isArray(res) && res.entrances) ||
-    Math.max(1, ...rooms.map(r => r.entrance || 1));
-  const groups = {};   // key: `${floor}|${entrance}` -> rooms[]
-  rooms.forEach(r => { const k = `${r.floor}|${r.entrance || 1}`; (groups[k] ||= []).push(r); });
+  const entrancesCount = Math.max(
+    (!Array.isArray(res) && res.entrances) || 1,
+    1, ...rooms.map(r => r.entrance || 1));
+  const floorsCount = Math.max(1, ...rooms.map(r => r.floor || 1), 0);
   const chess = body.querySelector(".chess");
   chess.innerHTML = "";
-  const keys = Object.keys(groups).sort((a, b) => {
-    const [fa, ea] = a.split("|").map(Number), [fb, eb] = b.split("|").map(Number);
-    return fb - fa || ea - eb;                 // этажи сверху вниз, подъезды по порядку
-  });
-  let lastFloor = null;
-  for (const key of keys) {
-    const [fl, en] = key.split("|").map(Number);
-    const row = document.createElement("div");
-    row.className = "floor-row";
-    row.innerHTML = `<span class="floor-label">` +
-      (fl !== lastFloor ? `Этаж ${fl}` : `&nbsp;&nbsp;`) +
-      (entrancesCount > 1 ? ` · Подъезд ${en}` : ``) + `</span>`;
-    lastFloor = fl;
-    const balls = document.createElement("div");
-    balls.className = "balls";
-    groups[key].sort((a, b) => Number(a.number) - Number(b.number) || a.number.localeCompare(b.number))
-      .forEach(r => {
-        const ball = document.createElement("div");
-        ball.className = "ball" + (r.kind === "non_residential" ? " non-res" : "");
-        ball.style.background = r.status_color;
-        ball.textContent = r.number;
-        ball.title = `Кв. ${r.number}: ${r.status_label}` +
-          (entrancesCount > 1 ? ` · подъезд ${r.entrance || 1}` : "") +
-          (r.open_violations ? ` · открытых нарушений: ${r.open_violations}` : "");
-        ball.onclick = () => goRoom(r.id);
-        balls.appendChild(ball);
-      });
-    row.appendChild(balls);
-    chess.appendChild(row);
+  if (!rooms.length) {
+    chess.innerHTML = `<span class="muted">Помещений нет. Добавьте вручную или сгенерируйте через ✏️ корпуса.</span>`;
+    return;
   }
-  if (!keys.length) chess.innerHTML = `<span class="muted">Помещений нет. Добавьте вручную или сгенерируйте через ✏️ корпуса.</span>`;
+  // группировка: `${floor}|${entrance}` -> rooms[]
+  const groups = {};
+  rooms.forEach(r => { const k = `${r.floor}|${r.entrance || 1}`; (groups[k] ||= []).push(r); });
+  const cellHtml = (fl, en) => {
+    const list = (groups[`${fl}|${en}`] || [])
+      .sort((a, b) => Number(a.number) - Number(b.number) || a.number.localeCompare(b.number));
+    if (!list.length) return `<div class="balls"></div>`;
+    return `<div class="balls">` + list.map(r =>
+      `<div class="ball${r.kind === "non_residential" ? " non-res" : ""}" data-id="${r.id}" style="background:${r.status_color}" ` +
+      `title="Кв. ${esc(r.number)}: ${esc(r.status_label)} · этаж ${r.floor}${entrancesCount > 1 ? ` · подъезд ${r.entrance || 1}` : ""}` +
+      (r.open_violations ? ` · открытых нарушений: ${r.open_violations}` : "") + `">${esc(r.number)}</div>`).join("") + `</div>`;
+  };
+  if (entrancesCount <= 1) {
+    // один подъезд — обычный список этажей сверху вниз
+    chess.classList.remove("by-entrance");
+    for (let fl = floorsCount; fl >= 1; fl--) {
+      const row = document.createElement("div");
+      row.className = "floor-row";
+      row.innerHTML = `<span class="floor-label">Этаж ${fl}</span>` + cellHtml(fl, 1);
+      chess.appendChild(row);
+    }
+  } else {
+    // несколько подъездов: каждый подъезд — отдельная колонка, этажи строками снизу вверх
+    chess.classList.add("by-entrance");
+    chess.style.gridTemplateColumns = `auto repeat(${entrancesCount}, max-content)`;
+    const roman = n => ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII","XIII","XIV","XV",
+      "XVI","XVII","XVIII","XIX","XX"][n-1] || String(n);
+    const corner = document.createElement("div");
+    corner.className = "chess-corner"; corner.innerHTML = `<span class="muted small">Этаж \\ Подъезд</span>`;
+    chess.appendChild(corner);
+    for (let en = 1; en <= entrancesCount; en++) {
+      const head = document.createElement("div");
+      head.className = "entrance-head";
+      head.textContent = `Подъезд ${roman(en)}`;
+      chess.appendChild(head);
+    }
+    for (let fl = floorsCount; fl >= 1; fl--) {
+      const lbl = document.createElement("div");
+      lbl.className = "floor-label";
+      lbl.textContent = `Этаж ${fl}`;
+      chess.appendChild(lbl);
+      for (let en = 1; en <= entrancesCount; en++) {
+        const cell = document.createElement("div");
+        cell.className = "chess-cell";
+        cell.innerHTML = cellHtml(fl, en);
+        chess.appendChild(cell);
+      }
+    }
+  }
+  chess.querySelectorAll(".ball").forEach(ball => {
+    ball.onclick = () => goRoom(Number(ball.dataset.id));
+  });
 }
 
 function buildingFormHtml(b) {
   b = b || { name: "", address: "", floors: 5, apartments_per_floor: 4, entrances: 1 };
+  const total = (b.floors || 0) * (b.entrances ?? 1) * (b.apartments_per_floor || 0);
   return `
     <label>Название корпуса<input id="bf-name" value="${esc(b.name)}" placeholder="Корпус 1"></label>
     <label>Адрес<input id="bf-address" value="${esc(b.address)}"></label>
     <div class="form-grid">
       <label>Этажей<input id="bf-floors" type="number" min="1" max="200" value="${b.floors}"></label>
       <label>Подъездов<input id="bf-entrances" type="number" min="1" max="50" value="${b.entrances ?? 1}"></label>
-      <label>Квартир на этаж<input id="bf-per" type="number" min="1" max="100" value="${b.apartments_per_floor}"></label>
+      <label>Квартир на этаж (в подъезде)<input id="bf-per" type="number" min="1" max="100" value="${b.apartments_per_floor}"></label>
     </div>
-    ${b.id ? `<p class="muted small">Изменение этажности добавляет недостающие квартиры; лишние не удаляются.</p>`
-           : `<label><input type="checkbox" id="bf-gen" checked style="width:auto"> Автоматически создать квартиры (${b.floors * b.apartments_per_floor} шт.)</label>`}`;
+    <p class="muted small" id="bf-total">Всего помещений: ${total}</p>
+    ${b.id ? `<p class="muted small">Изменение параметров добавляет недостающие квартиры; лишние не удаляются.</p>`
+           : `<label><input type="checkbox" id="bf-gen" checked style="width:auto"> Автоматически создать квартиры (${total} шт.)</label>`}`;
 }
 
 async function buildingDialog(oid, b) {
   const r = await showModal(b ? "Редактировать корпус" : "Новый корпус", buildingFormHtml(b));
   if (!r) return;
+  // живая пересчёт общего количества квартир в форме
+  const recalc = () => {
+    const t = Number(r.querySelector("#bf-floors").value) *
+              (Number(r.querySelector("#bf-entrances").value) || 1) *
+              Number(r.querySelector("#bf-per").value);
+    r.querySelector("#bf-total").textContent = `Всего помещений: ${isFinite(t) ? t : 0}`;
+  };
+  ["#bf-floors", "#bf-entrances", "#bf-per"].forEach(sel =>
+    r.querySelector(sel).addEventListener("input", recalc));
   const data = {
     name: r.querySelector("#bf-name").value.trim(),
     address: r.querySelector("#bf-address").value.trim(),
@@ -320,10 +356,12 @@ async function buildingDialog(oid, b) {
     entrances: Number(r.querySelector("#bf-entrances").value) || 1,
   };
   if (!data.name) return toast("Укажите название корпуса");
+  const newTotal = data.floors * data.entrances * data.apartments_per_floor;
   try {
     if (b) {
       await api(`/api/buildings/${b.id}`, { json: data });
-      if (data.floors * data.apartments_per_floor > b.floors * b.apartments_per_floor) {
+      const oldTotal = b.floors * (b.entrances ?? 1) * b.apartments_per_floor;
+      if (newTotal > oldTotal) {
         await fetch(`/api/buildings/${b.id}/generate?floors=${data.floors}&per_floor=${data.apartments_per_floor}&entrances=${data.entrances}`, {
           method: "POST", headers: { "Authorization": "Bearer " + state.token } });
       }
