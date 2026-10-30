@@ -53,6 +53,23 @@ def get_db():
 app = FastAPI(title="Сдача-приёмка квартир", version="1.0")
 
 
+@app.exception_handler(405)
+def _405_handler(request: Request, exc):
+    """Дружелюбный ответ вместо голого «Method Not Allowed»: подсказываем,
+    какой метод нужен для данного пути (защита от старого закешированного JS)."""
+    from starlette.routing import Match
+    route_methods = set()
+    for r in app.routes:
+        match, _ = r.matches(request.scope)
+        if match == Match.FULL and hasattr(r, "methods"):
+            route_methods |= r.methods
+    hint = ""
+    if route_methods:
+        hint = f". Допустимые методы для этого пути: {', '.join(sorted(route_methods))}"
+    return JSONResponse({"detail": f"Метод {request.method} не поддерживается для {request.url.path}{hint}. "
+                                   f"Обновите страницу с очисткой кэша (Ctrl+F5)."}, status_code=405)
+
+
 class NoCacheStaticFiles(StaticFiles):
     """Статика без кэширования: браузер всегда получает свежий JS/CSS
     (защита от «Method Not Allowed» из-за закешированного старого app.js)."""
@@ -513,25 +530,50 @@ def delete_building(bid: int, db: Session = Depends(get_db),
 
 
 @app.post("/api/buildings/{bid}/generate")
-def regenerate_rooms(bid: int, floors: int = Form(...), per_floor: int = Form(...),
-                     entrances: int = Form(1),
-                     db: Session = Depends(get_db), user: User = Depends(require_level(3))):
-    """Массовая генерация квартир по этажам. Существующие номера сохраняются."""
+async def regenerate_rooms(bid: int, request: Request,
+                           db: Session = Depends(get_db), user: User = Depends(require_level(3))):
+    """Массовая генерация квартир по этажам. Существующие номера сохраняются.
+
+    Параметры floors / per_floor / entrances принимаются и как JSON-тело,
+    и как query-параметры или форма — чтобы любой вариант клиента работал.
+    """
     b = db.get(Building, bid)
     if not b:
         raise HTTPException(404, "Корпус не найден")
+    data = {}
+    try:
+        ct = request.headers.get("content-type", "")
+        if "application/json" in ct:
+            data = await request.json()
+        elif "multipart/form-data" in ct or "application/x-www-form-urlencoded" in ct:
+            fd = await request.form()
+            data = {k: fd[k] for k in fd}
+    except Exception:
+        data = {}
+    def pick(key, default=None):
+        v = data.get(key, request.query_params.get(key, default))
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+    floors = pick("floors")
+    per_floor = pick("per_floor")
+    entrances = pick("entrances")
+    if floors is None or per_floor is None:
+        raise HTTPException(422, "Укажите floors и per_floor")
     b.floors, b.apartments_per_floor = floors, per_floor
-    b.entrances = max(entrances, 1)
-    existing = {(r.number, r.floor, r.entrance or 1) for r in b.rooms}
+    b.entrances = max(entrances or b.entrances or 1, 1)
+    existing_numbers = {r.number for r in b.rooms}
     added = 0
     # apartments_per_floor — квартир на этаж одного подъезда; обход: этаж → подъезд → квартира
     for fl in range(1, floors + 1):
         for en in range(1, b.entrances + 1):
             for i in range(1, per_floor + 1):
                 n = ((fl - 1) * b.entrances + (en - 1)) * per_floor + i
-                if (str(n), fl, en) not in existing:
+                if str(n) not in existing_numbers:
                     db.add(Room(building_id=b.id, number=str(n), floor=fl,
                                 entrance=en, status="not_inspected"))
+                    existing_numbers.add(str(n))
                     added += 1
     db.commit()
     return {"added": added, "total_numbers": floors * b.entrances * per_floor}
