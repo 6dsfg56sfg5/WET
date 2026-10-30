@@ -39,10 +39,14 @@ res = requests.get(f"{B}/api/buildings/{bid}/rooms", headers=adm).json()
 rooms = res["rooms"] if isinstance(res, dict) else res
 if isinstance(res, dict): assert res.get("entrances") == 2, res
 assert len(rooms) == 16, len(rooms)
-ent = {(rr["floor"], rr["number"]): rr.get("entrance") for rr in rooms}
-# этаж 1: кв. 1-4 → подъезд 1, кв. 5-8 → подъезд 2; этаж 2: 9-12 → п1, 13-16 → п2
-assert ent[(1,"1")] == 1 and ent[(1,"4")] == 1 and ent[(1,"5")] == 2 and ent[(1,"8")] == 2, ent
-assert ent[(2,"9")] == 1 and ent[(2,"12")] == 1 and ent[(2,"13")] == 2 and ent[(2,"16")] == 2, ent
+ent = {rr["number"]: rr.get("entrance") for rr in rooms}
+flr = {rr["number"]: rr["floor"] for rr in rooms}
+# нумерация сквозная по подъездам: сначала весь 1-й подъезд снизу вверх (кв. 1-8),
+# затем 2-й подъезд (кв. 9-16)
+assert all(ent[str(n)] == 1 for n in range(1, 9)), ent
+assert flr["1"] == 1 and flr["4"] == 1 and flr["5"] == 2 and flr["8"] == 2, flr
+assert all(ent[str(n)] == 2 for n in range(9, 17)), ent
+assert flr["9"] == 1 and flr["12"] == 1 and flr["13"] == 2 and flr["16"] == 2, flr
 rid = rooms[0]["id"]
 
 # нарушение + фото (level 2)

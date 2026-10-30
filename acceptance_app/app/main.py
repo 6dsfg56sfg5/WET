@@ -491,12 +491,14 @@ def create_building(oid: int, data: BuildingIn, db: Session = Depends(get_db),
     db.flush()
     if data.generate_rooms:
         # apartments_per_floor — квартир на этаж ОДНОГО подъезда;
-        # всего помещений = этажи × подъезды × квартир на этаж
-        n = 0
-        for fl in range(1, data.floors + 1):
-            for en in range(1, data.entrances + 1):
-                for _ in range(data.apartments_per_floor):
-                    n += 1
+        # всего помещений = этажи × подъезды × квартир на этаж.
+        # Нумерация сквозная по подъездам: сначала весь 1-й подъезд
+        # (снизу вверх), затем 2-й и т.д.
+        per = data.apartments_per_floor
+        for en in range(1, data.entrances + 1):
+            for fl in range(1, data.floors + 1):
+                for i in range(1, per + 1):
+                    n = (en - 1) * data.floors * per + (fl - 1) * per + i
                     db.add(Room(building_id=b.id, number=str(n), floor=fl,
                                 entrance=en,
                                 kind="residential", finish_type="rough",
@@ -565,11 +567,13 @@ async def regenerate_rooms(bid: int, request: Request,
     b.entrances = max(entrances or b.entrances or 1, 1)
     existing_numbers = {r.number for r in b.rooms}
     added = 0
-    # apartments_per_floor — квартир на этаж одного подъезда; обход: этаж → подъезд → квартира
-    for fl in range(1, floors + 1):
-        for en in range(1, b.entrances + 1):
+    # apartments_per_floor — квартир на этаж одного подъезда.
+    # Нумерация сквозная по подъездам: сначала весь 1-й подъезд (снизу вверх),
+    # затем 2-й и т.д.
+    for en in range(1, b.entrances + 1):
+        for fl in range(1, floors + 1):
             for i in range(1, per_floor + 1):
-                n = ((fl - 1) * b.entrances + (en - 1)) * per_floor + i
+                n = (en - 1) * floors * per_floor + (fl - 1) * per_floor + i
                 if str(n) not in existing_numbers:
                     db.add(Room(building_id=b.id, number=str(n), floor=fl,
                                 entrance=en, status="not_inspected"))
@@ -940,8 +944,9 @@ def init_db():
             insp = db.scalar(select(User).where(User.username == "inspector"))
             db.add(ObjectEmployee(object_id=o.id, employee_id=insp.id))
             n = 0
-            for fl in range(1, 4):
-                for en in (1, 2):
+            # нумерация сквозная по подъездам: сначала весь 1-й подъезд (снизу вверх), затем 2-й
+            for en in (1, 2):
+                for fl in range(1, 4):
                     for i in range(1, 5):
                         n += 1
                         db.add(Room(building_id=b.id, number=str(n), floor=fl,
