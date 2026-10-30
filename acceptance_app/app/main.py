@@ -163,12 +163,14 @@ class BuildingIn(BaseModel):
     address: str = ""
     floors: int = Field(1, ge=1, le=200)
     apartments_per_floor: int = Field(1, ge=1, le=100)
+    entrances: int = Field(1, ge=1, le=50)   # количество подъездов
     generate_rooms: bool = True
 
 
 class RoomIn(BaseModel):
     number: str
     floor: int = 1
+    entrance: int = 1
     kind: str = "residential"
     finish_type: str = "rough"
     status: str = "not_inspected"
@@ -179,6 +181,7 @@ class RoomIn(BaseModel):
 class RoomPatch(BaseModel):
     number: Optional[str] = None
     floor: Optional[int] = None
+    entrance: Optional[int] = None
     kind: Optional[str] = None
     finish_type: Optional[str] = None
     status: Optional[str] = None
@@ -215,6 +218,7 @@ def room_json(r: Room) -> dict:
     st = LABELS["room_status"].get(r.status, (r.status, "#bdbdbd"))
     return {
         "id": r.id, "number": r.number, "floor": r.floor,
+        "entrance": getattr(r, "entrance", 1) or 1,
         "kind": r.kind, "kind_label": LABELS["kind"].get(r.kind, r.kind),
         "finish_type": r.finish_type,
         "finish_label": LABELS["finish"].get(r.finish_type, r.finish_type),
@@ -392,6 +396,7 @@ def get_object(oid: int, db: Session = Depends(get_db), user: User = Depends(cur
         buildings.append({
             "id": b.id, "name": b.name, "address": b.address,
             "floors": b.floors, "apartments_per_floor": b.apartments_per_floor,
+            "entrances": getattr(b, "entrances", 1) or 1,
             "stats": status_counts(b.rooms),
         })
     employees = [{
@@ -450,15 +455,18 @@ def create_building(oid: int, data: BuildingIn, db: Session = Depends(get_db),
     if db.scalar(select(Building).where(Building.object_id == oid, Building.name == data.name)):
         raise HTTPException(409, "Корпус с таким названием уже есть в объекте")
     b = Building(object_id=oid, name=data.name, address=data.address,
-                 floors=data.floors, apartments_per_floor=data.apartments_per_floor)
+                 floors=data.floors, apartments_per_floor=data.apartments_per_floor,
+                 entrances=data.entrances)
     db.add(b)
     db.flush()
     if data.generate_rooms:
+        per_entrance = max(data.apartments_per_floor // max(data.entrances, 1), 1)
         n = 0
         for fl in range(1, data.floors + 1):
             for i in range(1, data.apartments_per_floor + 1):
                 n += 1
                 db.add(Room(building_id=b.id, number=str(n), floor=fl,
+                            entrance=min((i - 1) // per_entrance + 1, data.entrances),
                             kind="residential", finish_type="rough",
                             status="not_inspected"))
     db.commit()
@@ -473,6 +481,7 @@ def update_building(bid: int, data: BuildingIn, db: Session = Depends(get_db),
         raise HTTPException(404, "Корпус не найден")
     b.name, b.address = data.name, data.address
     b.floors, b.apartments_per_floor = data.floors, data.apartments_per_floor
+    b.entrances = data.entrances
     db.commit()
     return {"ok": True}
 
@@ -490,12 +499,15 @@ def delete_building(bid: int, db: Session = Depends(get_db),
 
 @app.post("/api/buildings/{bid}/generate")
 def regenerate_rooms(bid: int, floors: int = Form(...), per_floor: int = Form(...),
+                     entrances: int = Form(1),
                      db: Session = Depends(get_db), user: User = Depends(require_level(3))):
     """Массовая генерация квартир по этажам. Существующие номера сохраняются."""
     b = db.get(Building, bid)
     if not b:
         raise HTTPException(404, "Корпус не найден")
     b.floors, b.apartments_per_floor = floors, per_floor
+    b.entrances = max(entrances, 1)
+    per_entrance = max(per_floor // max(b.entrances, 1), 1)
     existing = {r.number for r in b.rooms}
     n = 0
     added = 0
@@ -504,6 +516,7 @@ def regenerate_rooms(bid: int, floors: int = Form(...), per_floor: int = Form(..
             n += 1
             if str(n) not in existing:
                 db.add(Room(building_id=b.id, number=str(n), floor=fl,
+                            entrance=min((i - 1) // per_entrance + 1, b.entrances),
                             status="not_inspected"))
                 added += 1
     db.commit()
@@ -547,10 +560,14 @@ def unassign_employee(oid: int, assignment_id: int, db: Session = Depends(get_db
 
 @app.get("/api/buildings/{bid}/rooms")
 def list_rooms(bid: int, db: Session = Depends(get_db), user: User = Depends(current_user)):
+    b = db.get(Building, bid)
+    if not b:
+        raise HTTPException(404, "Корпус не найден")
     rooms = db.scalars(select(Room).where(Room.building_id == bid)
                        .options(selectinload(Room.violations))
                        .order_by(Room.floor.desc(), Room.number)).all()
-    return [room_json(r) for r in rooms]
+    return {"rooms": [room_json(r) for r in rooms],
+            "entrances": getattr(b, "entrances", 1) or 1}
 
 
 @app.get("/api/rooms/{rid}")
@@ -561,7 +578,8 @@ def get_room(rid: int, db: Session = Depends(get_db), user: User = Depends(curre
     b = r.building
     return {
         **room_json(r),
-        "building": {"id": b.id, "name": b.name, "address": b.address},
+        "building": {"id": b.id, "name": b.name, "address": b.address,
+                       "entrances": getattr(b, "entrances", 1) or 1},
         "object": {"id": b.object.id, "name": b.object.name},
         "violations": [violation_json(v) for v in r.violations],
     }
@@ -605,6 +623,8 @@ def patch_room(rid: int, data: RoomPatch, db: Session = Depends(get_db),
                                              Room.number == upd["number"], Room.id != rid))
         if clash:
             raise HTTPException(409, "Помещение с таким номером уже существует")
+    if "entrance" in upd and upd["entrance"] < 1:
+        raise HTTPException(400, "Некорректный подъезд")
     for k, v in upd.items():
         setattr(r, k, v)
     db.commit()
@@ -818,8 +838,26 @@ def index():
 # Инициализация БД и демо-данных
 # ---------------------------------------------------------------------------
 
+def _migrate_add_columns():
+    """Добавляет новые колонки (entrances/entrance) в уже существующую SQLite-базу."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            def cols(table):
+                return {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            bc = cols("buildings")
+            if bc and "entrances" not in bc:
+                conn.execute(text("ALTER TABLE buildings ADD COLUMN entrances INTEGER NOT NULL DEFAULT 1"))
+            rc = cols("rooms")
+            if rc and "entrance" not in rc:
+                conn.execute(text("ALTER TABLE rooms ADD COLUMN entrance INTEGER NOT NULL DEFAULT 1"))
+    except Exception as e:  # база ещё не создана или не SQLite — не страшно
+        print("migrate skip:", e)
+
+
 def init_db():
     Base.metadata.create_all(engine)
+    _migrate_add_columns()
     with SessionLocal() as db:
         if db.scalar(select(func.count()).select_from(User)) == 0:
             demo = [
@@ -836,7 +874,7 @@ def init_db():
             db.add(o)
             db.flush()
             b = Building(object_id=o.id, name="Корпус 1", address="г. Москва, ул. Парковая, д. 1",
-                         floors=3, apartments_per_floor=4)
+                         floors=3, apartments_per_floor=4, entrances=2)
             db.add(b)
             db.flush()
             statuses = ["not_inspected", "ready_to_transfer", "violations_found",
@@ -850,6 +888,7 @@ def init_db():
                 for i in range(1, 5):
                     n += 1
                     db.add(Room(building_id=b.id, number=str(n), floor=fl,
+                                entrance=(i - 1) // 2 + 1,
                                 kind="residential" if n % 7 else "non_residential",
                                 finish_type=finishes[n % 4],
                                 status=statuses[n % 7],
