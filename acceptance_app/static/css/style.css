@@ -60,9 +60,16 @@ textarea { resize: vertical; }
 
 /* шахматка */
 .chess { display: grid; gap: 6px; overflow-x: auto; padding: 6px 2px; }
+.chess.by-entrance { align-items: start; justify-content: start; gap: 8px 10px; }
+.chess-corner { display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; }
+.entrance-head { text-align: center; font-size: .78rem; font-weight: 600; color: var(--muted);
+  border-bottom: 2px solid var(--border, #ddd); padding-bottom: 2px; }
+.chess-cell { min-width: 54px; }
 .floor-row { display: flex; align-items: center; gap: 6px; }
 .floor-label { min-width: 62px; font-size: .78rem; color: var(--muted); text-align: right; }
+.chess.by-entrance .floor-label { white-space: nowrap; }
 .balls { display: flex; gap: 8px; flex-wrap: wrap; }
+.chess.by-entrance .balls { flex-direction: column; flex-wrap: nowrap; }
 .ball { width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
         color: #fff; font-weight: 700; font-size: .85rem; cursor: pointer; border: 3px solid rgba(0,0,0,.12);
         text-shadow: 0 1px 2px rgba(0,0,0,.45); transition: transform .1s; user-select: none; }

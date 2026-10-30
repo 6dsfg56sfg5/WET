@@ -51,7 +51,19 @@ def get_db():
 
 
 app = FastAPI(title="Сдача-приёмка квартир", version="1.0")
-app.mount("/static", StaticFiles(directory=os.path.join(APP_DIR, "static")), name="static")
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Статика без кэширования: браузер всегда получает свежий JS/CSS
+    (защита от «Method Not Allowed» из-за закешированного старого app.js)."""
+
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
+
+
+app.mount("/static", NoCacheStaticFiles(directory=os.path.join(APP_DIR, "static")), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ---------------------------------------------------------------------------
@@ -397,6 +409,7 @@ def get_object(oid: int, db: Session = Depends(get_db), user: User = Depends(cur
             "id": b.id, "name": b.name, "address": b.address,
             "floors": b.floors, "apartments_per_floor": b.apartments_per_floor,
             "entrances": getattr(b, "entrances", 1) or 1,
+            "total_rooms": b.total_rooms,
             "stats": status_counts(b.rooms),
         })
     employees = [{
@@ -460,15 +473,17 @@ def create_building(oid: int, data: BuildingIn, db: Session = Depends(get_db),
     db.add(b)
     db.flush()
     if data.generate_rooms:
-        per_entrance = max(data.apartments_per_floor // max(data.entrances, 1), 1)
+        # apartments_per_floor — квартир на этаж ОДНОГО подъезда;
+        # всего помещений = этажи × подъезды × квартир на этаж
         n = 0
         for fl in range(1, data.floors + 1):
-            for i in range(1, data.apartments_per_floor + 1):
-                n += 1
-                db.add(Room(building_id=b.id, number=str(n), floor=fl,
-                            entrance=min((i - 1) // per_entrance + 1, data.entrances),
-                            kind="residential", finish_type="rough",
-                            status="not_inspected"))
+            for en in range(1, data.entrances + 1):
+                for _ in range(data.apartments_per_floor):
+                    n += 1
+                    db.add(Room(building_id=b.id, number=str(n), floor=fl,
+                                entrance=en,
+                                kind="residential", finish_type="rough",
+                                status="not_inspected"))
     db.commit()
     return {"id": b.id}
 
@@ -507,20 +522,19 @@ def regenerate_rooms(bid: int, floors: int = Form(...), per_floor: int = Form(..
         raise HTTPException(404, "Корпус не найден")
     b.floors, b.apartments_per_floor = floors, per_floor
     b.entrances = max(entrances, 1)
-    per_entrance = max(per_floor // max(b.entrances, 1), 1)
-    existing = {r.number for r in b.rooms}
-    n = 0
+    existing = {(r.number, r.floor, r.entrance or 1) for r in b.rooms}
     added = 0
+    # apartments_per_floor — квартир на этаж одного подъезда; обход: этаж → подъезд → квартира
     for fl in range(1, floors + 1):
-        for i in range(1, per_floor + 1):
-            n += 1
-            if str(n) not in existing:
-                db.add(Room(building_id=b.id, number=str(n), floor=fl,
-                            entrance=min((i - 1) // per_entrance + 1, b.entrances),
-                            status="not_inspected"))
-                added += 1
+        for en in range(1, b.entrances + 1):
+            for i in range(1, per_floor + 1):
+                n = ((fl - 1) * b.entrances + (en - 1)) * per_floor + i
+                if (str(n), fl, en) not in existing:
+                    db.add(Room(building_id=b.id, number=str(n), floor=fl,
+                                entrance=en, status="not_inspected"))
+                    added += 1
     db.commit()
-    return {"added": added, "total_numbers": n}
+    return {"added": added, "total_numbers": floors * b.entrances * per_floor}
 
 
 # --- сотрудники объекта ---
@@ -885,15 +899,16 @@ def init_db():
             db.add(ObjectEmployee(object_id=o.id, employee_id=insp.id))
             n = 0
             for fl in range(1, 4):
-                for i in range(1, 5):
-                    n += 1
-                    db.add(Room(building_id=b.id, number=str(n), floor=fl,
-                                entrance=(i - 1) // 2 + 1,
-                                kind="residential" if n % 7 else "non_residential",
-                                finish_type=finishes[n % 4],
-                                status=statuses[n % 7],
-                                area=35 + n * 3,
-                                buyer_info=f"Покупатель №{n}, ДДУ-{1000 + n}" if n % 2 else ""))
+                for en in (1, 2):
+                    for i in range(1, 5):
+                        n += 1
+                        db.add(Room(building_id=b.id, number=str(n), floor=fl,
+                                    entrance=en,
+                                    kind="residential" if n % 7 else "non_residential",
+                                    finish_type=finishes[n % 4],
+                                    status=statuses[n % 7],
+                                    area=35 + n * 3,
+                                    buyer_info=f"Покупатель №{n}, ДДУ-{1000 + n}" if n % 2 else ""))
             db.commit()
             room1 = db.scalar(select(Room).where(Room.building_id == b.id, Room.number == "3"))
             v = Violation(room_id=room1.id, title="Трещина на стене балкона",

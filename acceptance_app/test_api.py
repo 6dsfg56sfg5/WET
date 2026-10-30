@@ -27,18 +27,22 @@ print("объекты:", [(o["name"], o["stats"]["total"]) for o in objs])
 oid = objs[0]["id"]
 
 # создание корпуса с генерацией квартир (level 3)
+# apartments_per_floor = квартир на этаж одного подъезда → всего 2*2*4 = 16
 r = requests.post(f"{B}/api/objects/{oid}/buildings", json={"name":"Корпус Тест","address":"ул. Тестовая, 2","floors":2,"apartments_per_floor":4,"entrances":2}, headers=adm)
 assert r.status_code == 201, r.text
 bid = r.json()["id"]
 obj = requests.get(f"{B}/api/objects/{oid}", headers=adm).json()
 tb = [x for x in obj["buildings"] if x["id"] == bid][0]
 assert tb["entrances"] == 2, tb
+assert tb["total_rooms"] == 16, tb
 res = requests.get(f"{B}/api/buildings/{bid}/rooms", headers=adm).json()
 rooms = res["rooms"] if isinstance(res, dict) else res
 if isinstance(res, dict): assert res.get("entrances") == 2, res
-assert len(rooms) == 8, len(rooms)
-ent = {rr["number"]: rr.get("entrance") for rr in rooms}
-assert ent["1"] == 1 and ent["2"] == 1 and ent["3"] == 2 and ent["4"] == 2, ent
+assert len(rooms) == 16, len(rooms)
+ent = {(rr["floor"], rr["number"]): rr.get("entrance") for rr in rooms}
+# этаж 1: кв. 1-4 → подъезд 1, кв. 5-8 → подъезд 2; этаж 2: 9-12 → п1, 13-16 → п2
+assert ent[(1,"1")] == 1 and ent[(1,"4")] == 1 and ent[(1,"5")] == 2 and ent[(1,"8")] == 2, ent
+assert ent[(2,"9")] == 1 and ent[(2,"12")] == 1 and ent[(2,"13")] == 2 and ent[(2,"16")] == 2, ent
 rid = rooms[0]["id"]
 
 # нарушение + фото (level 2)
