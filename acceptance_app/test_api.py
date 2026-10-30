@@ -1,5 +1,5 @@
 import requests, io, json
-B = "http://127.0.0.1:8123"
+B = "http://127.0.0.1:8000"
 
 def login(u, p):
     r = requests.post(f"{B}/api/login", json={"username": u, "password": p})
