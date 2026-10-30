@@ -51,7 +51,19 @@ def get_db():
 
 
 app = FastAPI(title="Сдача-приёмка квартир", version="1.0")
-app.mount("/static", StaticFiles(directory=os.path.join(APP_DIR, "static")), name="static")
+
+
+class NoCacheStaticFiles(StaticFiles):
+    """Статика без кэширования: браузер всегда получает свежий JS/CSS
+    (защита от «Method Not Allowed» из-за закешированного старого app.js)."""
+
+    async def get_response(self, path: str, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        return resp
+
+
+app.mount("/static", NoCacheStaticFiles(directory=os.path.join(APP_DIR, "static")), name="static")
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 # ---------------------------------------------------------------------------

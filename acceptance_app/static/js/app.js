@@ -18,8 +18,21 @@ const state = {
 async function api(path, opts = {}) {
   const headers = Object.assign({}, opts.headers || {});
   if (state.token) headers["Authorization"] = "Bearer " + state.token;
-  let method = opts.method || (opts.json !== undefined || opts.body !== undefined ? "POST" : "GET");
-  method = method.toUpperCase();
+  const hasBody = opts.json !== undefined || opts.body !== undefined;
+  // Если есть тело запроса, но метод не указан — выбираем метод по URL:
+  // редактирование сущности (/api/<ед.>/<id>) → PATCH, создание/вложенные действия → POST.
+  // Без этого браузер падает с «Request with GET/HEAD method cannot have body»,
+  // а старый закешированный JS давал «405 Method Not Allowed».
+  let method = opts.method;
+  if (!method) {
+    if (hasBody) {
+      const isEdit = /^\/api\/(rooms|buildings|objects|violations|employees)\/\d+(\/|$)/.test(path);
+      method = isEdit ? "PATCH" : "POST";
+    } else {
+      method = "GET";
+    }
+  }
+  method = String(method).toUpperCase();
   let body;
   if (opts.json !== undefined) {
     headers["Content-Type"] = "application/json";
