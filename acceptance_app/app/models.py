@@ -102,8 +102,13 @@ class Building(Base):
     address: Mapped[str] = mapped_column(String(300), default="")
     name: Mapped[str] = mapped_column(String(120))          # напр. «Корпус 1»
     floors: Mapped[int] = mapped_column(Integer, default=1)
-    apartments_per_floor: Mapped[int] = mapped_column(Integer, default=1)
+    apartments_per_floor: Mapped[int] = mapped_column(Integer, default=1)  # квартир на этаж ОДНОГО подъезда
     entrances: Mapped[int] = mapped_column(Integer, default=1)  # количество подъездов
+
+    @property
+    def total_rooms(self) -> int:
+        """Общее количество помещений: этажи × подъезды × квартир на этаж."""
+        return self.floors * max(self.entrances or 1, 1) * self.apartments_per_floor
 
     object: Mapped["Object"] = relationship(back_populates="buildings")
     rooms: Mapped[list["Room"]] = relationship(
